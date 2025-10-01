@@ -15,14 +15,26 @@ public class MaterialDAO {
 
             stmt.setString(1, material.getArticulo());
             stmt.setString(2, material.getTipo());
-            if (material.getEspesor() != null) stmt.setObject(3, material.getEspesor());
-            else stmt.setNull(3, java.sql.Types.DOUBLE);
+
+            if (material.getEspesor() != null) {
+                stmt.setDouble(3, material.getEspesor());
+            } else {
+                stmt.setNull(3, java.sql.Types.DOUBLE);
+            }
 
             stmt.setString(4, material.getDimensiones());
-            if (material.getCantidad() != null) stmt.setObject(5, material.getCantidad());
-            else stmt.setNull(5, java.sql.Types.INTEGER);
 
-            stmt.setString(6, material.getProveedor());
+            if (material.getCantidad() != null) {
+                stmt.setInt(5, material.getCantidad());
+            } else {
+                stmt.setNull(5, java.sql.Types.INTEGER);
+            }
+
+            if (material.getProveedor() != null) {
+                stmt.setString(6, material.getProveedor());
+            } else {
+                stmt.setNull(6, java.sql.Types.VARCHAR);
+            }
 
             stmt.executeUpdate();
 
@@ -41,10 +53,27 @@ public class MaterialDAO {
 
             stmt.setString(1, material.getArticulo());
             stmt.setString(2, material.getTipo());
-            if (material.getEspesor() != null) stmt.setObject(3, material.getEspesor()); else stmt.setNull(3, java.sql.Types.DOUBLE);
+
+            if (material.getEspesor() != null) {
+                stmt.setDouble(3, material.getEspesor());
+            } else {
+                stmt.setNull(3, java.sql.Types.DOUBLE);
+            }
+
             stmt.setString(4, material.getDimensiones());
-            if (material.getCantidad() != null) stmt.setObject(5, material.getCantidad()); else stmt.setNull(5, java.sql.Types.INTEGER);
-            stmt.setString(6, material.getProveedor());
+
+            if (material.getCantidad() != null) {
+                stmt.setInt(5, material.getCantidad());
+            } else {
+                stmt.setNull(5, java.sql.Types.INTEGER);
+            }
+
+            if (material.getProveedor() != null) {
+                stmt.setString(6, material.getProveedor());
+            } else {
+                stmt.setNull(6, java.sql.Types.VARCHAR);
+            }
+
             stmt.setLong(7, material.getIdMaterial());
 
             stmt.executeUpdate();
@@ -101,7 +130,9 @@ public class MaterialDAO {
             stmt.setString(2, pattern);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) materiales.add(mapResultSetToMaterial(rs));
+                while (rs.next()) {
+                    materiales.add(mapResultSetToMaterial(rs));
+                }
             }
         }
         return materiales;

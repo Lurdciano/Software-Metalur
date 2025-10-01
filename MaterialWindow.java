@@ -7,6 +7,7 @@ import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionListener;
+import java.sql.SQLException;
 import java.util.List;
 
 public class MaterialWindow extends JFrame {
@@ -24,8 +25,8 @@ public class MaterialWindow extends JFrame {
     private Material materialToEdit;
 
     // Componentes del formulario
-    private JTextField txtArticulo; // <-- nuevo campo Artículo
-    private JTextField txtTipo;
+    private JTextField txtArticulo;
+    private JComboBox<String> tipoComboBox; // ahora es JComboBox en vez de JTextField
     private JTextField txtEspesor;
     private JTextField txtDimensiones;
     private JTextField txtCantidad;
@@ -108,23 +109,34 @@ public class MaterialWindow extends JFrame {
         gbc.insets = new Insets(10, 10, 10, 10);
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Artículo (nuevo)
+        // Artículo
         gbc.gridx = 0; gbc.gridy = 0;
         panel.add(createLabel("Artículo:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
         txtArticulo = createTextField();
         panel.add(txtArticulo, gbc);
 
-        // Tipo
+        // Tipo -> ahora ComboBox con opciones fijas
         gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0;
         panel.add(createLabel("Tipo *:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-        txtTipo = createTextField();
-        panel.add(txtTipo, gbc);
+        tipoComboBox = new JComboBox<>();
+        tipoComboBox.setFont(LABEL_FONT);
+        // ---------------------------
+        // ESCRIBE AQUÍ LAS OPCIONES DISPONIBLES EN EL MENÚ (una por línea):
+        // Ejemplo:
+        tipoComboBox.addItem("Chapa");
+        tipoComboBox.addItem("Perfil");
+        tipoComboBox.addItem("Tubo");
+        tipoComboBox.addItem("Placa");
+        tipoComboBox.addItem("Otro");
+        // Fin de ejemplo — reemplaza / agrega las opciones que necesites.
+        // ---------------------------
+        panel.add(tipoComboBox, gbc);
 
-        // Espesor
+        // Espesor (opcional)
         gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0;
-        panel.add(createLabel("Espesor (mm):"), gbc);
+        panel.add(createLabel("Espesor (mm) (opcional):"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
         txtEspesor = createTextField();
         panel.add(txtEspesor, gbc);
@@ -143,9 +155,9 @@ public class MaterialWindow extends JFrame {
         txtCantidad = createTextField();
         panel.add(txtCantidad, gbc);
 
-        // Proveedor
+        // Proveedor (opcional)
         gbc.gridx = 0; gbc.gridy = 5; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0;
-        panel.add(createLabel("Proveedor:"), gbc);
+        panel.add(createLabel("Proveedor (opcional):"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
         txtProveedor = createTextField();
         panel.add(txtProveedor, gbc);
@@ -161,7 +173,7 @@ public class MaterialWindow extends JFrame {
         if (mode == Mode.SEARCH) {
             JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
             searchPanel.setBackground(BACKGROUND_COLOR);
-            searchPanel.add(createLabel("Buscar por tipo:"));
+            searchPanel.add(createLabel("Buscar por tipo / artículo:"));
             txtBuscar = createTextField();
             txtBuscar.setPreferredSize(new Dimension(300, 30));
             searchPanel.add(txtBuscar);
@@ -172,12 +184,10 @@ public class MaterialWindow extends JFrame {
             panel.add(searchPanel, BorderLayout.NORTH);
         }
 
+        // Tabla
         String[] columns = {"ID", "Artículo", "Tipo", "Espesor (mm)", "Dimensiones", "Cantidad", "Proveedor"};
         tableModel = new DefaultTableModel(columns, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
+            @Override public boolean isCellEditable(int row, int column) { return false; }
         };
 
         table = new JTable(tableModel);
@@ -233,6 +243,7 @@ public class MaterialWindow extends JFrame {
         return textField;
     }
 
+    // Nota: foreground NEGRO para los botones (mejor legibilidad)
     private JButton createButton(String text, ActionListener action) {
         JButton button = new JButton(text);
         button.setFont(LABEL_FONT);
@@ -271,8 +282,7 @@ public class MaterialWindow extends JFrame {
         for (Material material : materiales) {
             Object[] row = {
                 material.getIdMaterial(),
-                // Nuevo: artículo -> si tu modelo lo tiene, cambia material.getArticulo()
-                material.getTipo(), // si quieres mostrar artículo distinto, adapta el modelo
+                material.getArticulo() != null ? material.getArticulo() : "",
                 material.getTipo(),
                 material.getEspesor() != null ? material.getEspesor().toString() : "",
                 material.getDimensiones() != null ? material.getDimensiones() : "",
@@ -299,6 +309,9 @@ public class MaterialWindow extends JFrame {
             materialService.saveMaterial(material);
             showSuccessMessage("Material guardado exitosamente");
             clearForm();
+            if (mode == Mode.LIST || mode == Mode.SEARCH) loadData();
+        } catch (SQLException e) {
+            showErrorMessage("Error al guardar (DB): " + e.getMessage());
         } catch (Exception e) {
             showErrorMessage("Error al guardar: " + e.getMessage());
         }
@@ -316,6 +329,8 @@ public class MaterialWindow extends JFrame {
             materialService.updateMaterial(material);
             showSuccessMessage("Material actualizado exitosamente");
             dispose();
+        } catch (SQLException e) {
+            showErrorMessage("Error al actualizar (DB): " + e.getMessage());
         } catch (Exception e) {
             showErrorMessage("Error al actualizar: " + e.getMessage());
         }
@@ -323,12 +338,17 @@ public class MaterialWindow extends JFrame {
 
     private Material createMaterialFromForm() {
         Material material = new Material();
+
         material.setArticulo(txtArticulo.getText().trim());
 
+        // Tipo desde ComboBox (valor obligatorio)
+        Object sel = tipoComboBox.getSelectedItem();
+        if (sel == null) {
+            throw new IllegalArgumentException("El tipo es obligatorio");
+        }
+        material.setTipo(sel.toString());
 
-        material.setTipo(txtTipo.getText().trim());
-
-        // Espesor
+        // Espesor (opcional)
         String espesorText = txtEspesor.getText().trim();
         if (!espesorText.isEmpty()) {
             try {
@@ -336,11 +356,13 @@ public class MaterialWindow extends JFrame {
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("El espesor debe ser un número válido");
             }
+        } else {
+            material.setEspesor(null); // explícito: opcional
         }
 
         material.setDimensiones(txtDimensiones.getText().trim());
 
-        // Cantidad
+        // Cantidad (puede lanzar excepción si no es numérica)
         String cantidadText = txtCantidad.getText().trim();
         if (!cantidadText.isEmpty()) {
             try {
@@ -348,16 +370,26 @@ public class MaterialWindow extends JFrame {
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("La cantidad debe ser un número entero válido");
             }
+        } else {
+            material.setCantidad(null);
         }
 
-        material.setProveedor(txtProveedor.getText().trim());
+        // Proveedor (opcional)
+        String proveedorText = txtProveedor.getText().trim();
+        if (!proveedorText.isEmpty()) material.setProveedor(proveedorText);
+        else material.setProveedor(null);
+
         return material;
     }
 
     private void fillFormWithMaterial(Material material) {
-        // Si agregas campo articulo en modelo, rellénalo:
-        // txtArticulo.setText(material.getArticulo() != null ? material.getArticulo() : "");
-        txtTipo.setText(material.getTipo());
+        txtArticulo.setText(material.getArticulo() != null ? material.getArticulo() : "");
+        // Seleccionar en ComboBox si coincide con una opción
+        if (material.getTipo() != null) {
+            tipoComboBox.setSelectedItem(material.getTipo());
+        } else {
+            tipoComboBox.setSelectedIndex(-1);
+        }
         txtEspesor.setText(material.getEspesor() != null ? material.getEspesor().toString() : "");
         txtDimensiones.setText(material.getDimensiones() != null ? material.getDimensiones() : "");
         txtCantidad.setText(material.getCantidad() != null ? material.getCantidad().toString() : "");
@@ -366,12 +398,12 @@ public class MaterialWindow extends JFrame {
 
     private void clearForm() {
         txtArticulo.setText("");
-        txtTipo.setText("");
+        tipoComboBox.setSelectedIndex(-1);
         txtEspesor.setText("");
         txtDimensiones.setText("");
         txtCantidad.setText("");
         txtProveedor.setText("");
-        txtTipo.requestFocus();
+        txtArticulo.requestFocus();
     }
 
     private void openCreateWindow() {
@@ -385,7 +417,8 @@ public class MaterialWindow extends JFrame {
             return;
         }
 
-        Long materialId = (Long) tableModel.getValueAt(selectedRow, 0);
+        Object idObj = tableModel.getValueAt(selectedRow, 0);
+        Long materialId = (idObj instanceof Long) ? (Long) idObj : Long.valueOf(idObj.toString());
         try {
             Material material = materialService.getMaterialById(materialId);
             if (material != null) {
@@ -412,7 +445,8 @@ public class MaterialWindow extends JFrame {
         );
 
         if (option == JOptionPane.YES_OPTION) {
-            Long materialId = (Long) tableModel.getValueAt(selectedRow, 0);
+            Object idObj = tableModel.getValueAt(selectedRow, 0);
+            Long materialId = (idObj instanceof Long) ? (Long) idObj : Long.valueOf(idObj.toString());
             try {
                 materialService.deleteMaterial(materialId);
                 showSuccessMessage("Material eliminado exitosamente");
@@ -423,15 +457,7 @@ public class MaterialWindow extends JFrame {
         }
     }
 
-    private void showSuccessMessage(String message) {
-        JOptionPane.showMessageDialog(this, message, "Éxito", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private void showErrorMessage(String message) {
-        JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
-    }
-
-    private void showWarningMessage(String message) {
-        JOptionPane.showMessageDialog(this, message, "Advertencia", JOptionPane.WARNING_MESSAGE);
-    }
+    private void showSuccessMessage(String message) { JOptionPane.showMessageDialog(this, message, "Éxito", JOptionPane.INFORMATION_MESSAGE); }
+    private void showErrorMessage(String message) { JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE); }
+    private void showWarningMessage(String message) { JOptionPane.showMessageDialog(this, message, "Advertencia", JOptionPane.WARNING_MESSAGE); }
 }
