@@ -9,6 +9,7 @@ public class Pedido {
     private LocalDate fechaPedido;
     private LocalDate fechaEntregaEstimada;
     private Double kiloCantidad;
+    private String estadoPedido;
 
     public Pedido() {}
 
@@ -45,4 +46,12 @@ public class Pedido {
         }
         return "Pedido #" + idPedido;
     }
+
+    public String getEstadoPedido() {
+    return estadoPedido;
 }
+public void setEstadoPedido(String estadoPedido) {
+    this.estadoPedido = estadoPedido;
+}
+    }
+

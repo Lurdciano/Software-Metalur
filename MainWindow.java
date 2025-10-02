@@ -109,7 +109,7 @@ public class MainWindow extends JFrame {
         footerPanel.setBackground(new Color(236, 240, 241));
         footerPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
 
-        JLabel footerLabel = new JLabel("© 2024 Cian Metalúrgica", SwingConstants.CENTER);
+        JLabel footerLabel = new JLabel("© Terra Code - Todos los derechos reservados", SwingConstants.CENTER);
         footerLabel.setFont(new Font("Arial", Font.PLAIN, 12));
         footerLabel.setForeground(new Color(127, 140, 141));
 
