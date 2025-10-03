@@ -114,6 +114,83 @@ private void loadClientes() {
     }
 }
 
+// dentro de PedidoWindow, reemplaza la lógica de búsqueda bloqueante por esto
+private void setupClienteAutocomplete() {
+    JTextField editor = (JTextField) ((JComboBox) cmbCliente).getEditor().getEditorComponent();
+    cmbCliente.setEditable(true);
+    editor.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+        private SwingWorker<List<com.cianmetalurgica.model.Cliente>, Void> worker;
+        private void restartWorker() {
+            if (worker != null && !worker.isDone()) worker.cancel(true);
+            final String text = editor.getText();
+            worker = new SwingWorker<List<com.cianmetalurgica.model.Cliente>, Void>() {
+                @Override
+                protected List<com.cianmetalurgica.model.Cliente> doInBackground() throws Exception {
+                    // Llamada a clienteDAO/clienteService (no en EDT)
+                    return new com.cianmetalurgica.dao.ClienteDAO().findByName(text);
+                }
+                @Override
+                protected void done() {
+                    if (isCancelled()) return;
+                    try {
+                        List<com.cianmetalurgica.model.Cliente> resultados = get();
+                        DefaultComboBoxModel<com.cianmetalurgica.model.Cliente> model = new DefaultComboBoxModel<>();
+                        for (com.cianmetalurgica.model.Cliente c : resultados) model.addElement(c);
+                        cmbCliente.setModel(model);
+                        cmbCliente.getEditor().setItem(text); // preserve typed text
+                        cmbCliente.showPopup();
+                    } catch (Exception ex) {
+                        // ignorar o mostrar en la UI
+                    }
+                }
+            };
+            worker.execute();
+        }
+        @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { restartWorker(); }
+        @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { restartWorker(); }
+        @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { restartWorker(); }
+    });
+}
+
+
+private void openFinalizarWindow() {
+    // Comprobaciones defensivas
+    if (table == null || tableModel == null) {
+        showWarningMessage("La lista de pedidos no está disponible en este contexto.");
+        return;
+    }
+
+    int selectedRow = table.getSelectedRow();
+    if (selectedRow == -1) {
+        showWarningMessage("Seleccione un pedido para finalizar");
+        return;
+    }
+
+    Object idObj = tableModel.getValueAt(selectedRow, 0);
+    if (idObj == null) {
+        showWarningMessage("ID del pedido inválido");
+        return;
+    }
+
+    Long pedidoId;
+    try {
+        pedidoId = (idObj instanceof Number) ? ((Number) idObj).longValue() : Long.valueOf(idObj.toString());
+    } catch (Exception ex) {
+        showWarningMessage("No se pudo obtener el ID del pedido: " + ex.getMessage());
+        return;
+    }
+
+    com.cianmetalurgica.model.Pedido p = pedidoDAO.findById(pedidoId);
+    if (p == null) {
+        showWarningMessage("Pedido no encontrado (id=" + pedidoId + ")");
+        return;
+    }
+
+    FinalizarPedidoWindow fpw = new FinalizarPedidoWindow(this, p);
+    fpw.setVisible(true);
+}
+
+
 
     public PedidoWindow(JFrame parent, String mode, Pedido pedido) {
         this(parent, mode);
@@ -323,6 +400,10 @@ private void loadClientes() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         panel.setBackground(BACKGROUND_COLOR);
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        // dentro del bloque where you add list buttons (por ejemplo en createButtonPanel)
+panel.add(createButton("Finalizar", e -> openFinalizarWindow()));
+
 
         if ("CREATE".equals(mode)) {
             panel.add(createButton("Guardar", e -> savePedido()));
@@ -674,6 +755,10 @@ private void loadClientes() {
         if (p.getFechaEntregaEstimada() != null) txtFechaEntregaEstimada.setText(p.getFechaEntregaEstimada().toString());
         if (p.getEstadoPedido() != null) cmbEstadoPedido.setSelectedItem(p.getEstadoPedido());
         if (p.getKiloCantidad() != null) txtKiloCantidad.setText(p.getKiloCantidad().toString());
+    }
+
+    private void showWarningMessage(String seleccione_un_pedido_para_finalizar) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
 
    

@@ -8,6 +8,8 @@ import java.util.List;
 
 public class PedidoService {
     private PedidoDAO pedidoDAO = new PedidoDAO();
+    
+    
 
     public void savePedido(Pedido pedido) {
         if (pedido.getIdCliente() == null) {
@@ -63,4 +65,8 @@ public class PedidoService {
     public List<Pedido> searchPedidosByClienteName(String searchText) {
         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
+    
+   
+    
+
 }

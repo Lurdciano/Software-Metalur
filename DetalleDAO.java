@@ -36,28 +36,22 @@ public class DetalleDAO {
         }
     }
 
-    public void save(Detalle detalle) {
-        String sql = "INSERT INTO detalles (id_pedido, id_material, material_tipo, cantidad, dimensiones_pieza, numero_cortes, peso_pieza) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            if (detalle.getIdPedido() != null) ps.setLong(1, detalle.getIdPedido()); else ps.setNull(1, Types.BIGINT);
-            if (detalle.getIdMaterial() != null) ps.setLong(2, detalle.getIdMaterial()); else ps.setNull(2, Types.BIGINT);
-            ps.setString(3, detalle.getMaterialTipo());
-            if (detalle.getCantidad() != null) ps.setInt(4, detalle.getCantidad()); else ps.setNull(4, Types.INTEGER);
-            ps.setString(5, detalle.getDimensionesPieza());
-            if (detalle.getNumeroCortes() != null) ps.setInt(6, detalle.getNumeroCortes()); else ps.setNull(6, Types.INTEGER);
-            if (detalle.getPesoPieza() != null) ps.setDouble(7, detalle.getPesoPieza()); else ps.setNull(7, Types.DOUBLE);
-
-            int affected = ps.executeUpdate();
-            if (affected == 0) throw new SQLException("Insert detalle falló, no se creó ninguna fila.");
-            try (ResultSet gk = ps.getGeneratedKeys()) {
-                if (gk.next()) detalle.setIdDetalle(gk.getLong(1));
-            }
-        } catch (SQLException ex) {
-            throw new RuntimeException("Error en DetalleDAO.save: " + ex.getMessage(), ex);
+    public void save(Connection conn, Detalle detalle) throws SQLException {
+    String sql = "INSERT INTO detalles (id_pedido, id_material, cantidad, dimensiones_pieza, numero_cortes, peso_pieza) VALUES (?, ?, ?, ?, ?, ?)";
+    try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        ps.setLong(1, detalle.getIdPedido());
+        ps.setObject(2, detalle.getIdMaterial());
+        ps.setObject(3, detalle.getCantidad());
+        ps.setString(4, detalle.getDimensionesPieza());
+        if (detalle.getNumeroCortes() != null) ps.setInt(5, detalle.getNumeroCortes()); else ps.setNull(5, Types.INTEGER);
+        if (detalle.getPesoPieza() != null) ps.setDouble(6, detalle.getPesoPieza()); else ps.setNull(6, Types.DOUBLE);
+        ps.executeUpdate();
+        try (ResultSet rs = ps.getGeneratedKeys()) {
+            if (rs.next()) detalle.setIdDetalle(rs.getLong(1));
         }
     }
+}
+
 
     public void update(Detalle detalle) {
         String sql = "UPDATE detalles SET id_pedido = ?, id_material = ?, material_tipo = ?, cantidad = ?, dimensiones_pieza = ?, numero_cortes = ?, peso_pieza = ? " +
@@ -157,6 +151,10 @@ public class DetalleDAO {
     }
 
     void saveWithConnection(Detalle d, Connection conn) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
+
+    public void save(Detalle d) {
         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
 }
