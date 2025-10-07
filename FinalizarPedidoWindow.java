@@ -5,6 +5,11 @@ import com.cianmetalurgica.dao.MaterialDAO;
 import com.cianmetalurgica.dao.PedidoDAO;
 import com.cianmetalurgica.model.Detalle;
 import com.cianmetalurgica.model.Pedido;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
 
 import javax.swing.*;
 import javax.swing.event.TableModelEvent;
@@ -12,19 +17,19 @@ import javax.swing.event.TableModelListener;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
 import java.text.DecimalFormat;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 
 /**
- * Ventana para finalizar pedido — versión corregida para evitar StackOverflow por listener recursivo.
+ * Ventana para finalizar pedido — con generación de PDF usando PDFBox (directo).
  */
 public class FinalizarPedidoWindow extends JFrame {
     private static final Color BG = new Color(245,245,245);
     private static final Color BTN = new Color(52,73,94);
-    private static final Color BTN_HOVER = new Color(0,0,0);
+    private static final Color BTN_HOVER = new Color(44,62,80);
     private static final DecimalFormat MONEDA = new DecimalFormat("#,##0.00");
 
     private Pedido pedido;
@@ -37,7 +42,6 @@ public class FinalizarPedidoWindow extends JFrame {
     private JCheckBox chkDescontarStock;
     private JLabel lblTotal;
 
-    // Listener guardado para poder reusarlo o removerlo si hace falta
     private TableModelListener modelListener;
 
     public FinalizarPedidoWindow(JFrame parent, Pedido pedido) {
@@ -81,17 +85,12 @@ public class FinalizarPedidoWindow extends JFrame {
         table = new JTable(model);
         table.setRowHeight(24);
 
-        // Listener: SOLO recalcular cuando cambien columnas 3 o 4 (cantidad / precio unitario)
-        modelListener = new TableModelListener() {
-            @Override
-            public void tableChanged(TableModelEvent e) {
-                // Evento de tipo UPDATE y columna 3 o 4 -> recalc
-                if (e.getType() == TableModelEvent.UPDATE) {
-                    int col = e.getColumn();
-                    if (col == TableModelEvent.ALL_COLUMNS || col == 3 || col == 4) {
-                        // recalc cuando el usuario modificó cantidad/precio (o event ALL_COLUMNS)
-                        recalcTotal();
-                    }
+        // Listener: solo recalc cuando cambien columnas 3 o 4
+        modelListener = e -> {
+            if (e.getType() == TableModelEvent.UPDATE) {
+                int col = e.getColumn();
+                if (col == TableModelEvent.ALL_COLUMNS || col == 3 || col == 4) {
+                    recalcTotal();
                 }
             }
         };
@@ -118,8 +117,12 @@ public class FinalizarPedidoWindow extends JFrame {
 
         JButton btnPdf = createButton("Generar PDF");
         btnPdf.addActionListener(e -> {
-            try { generarPdfConReflexion(); }
-            catch (Exception ex) { JOptionPane.showMessageDialog(this, "Error al generar PDF: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE); ex.printStackTrace(); }
+            try {
+                generarPdf();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Error al generar PDF: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
+            }
         });
         right.add(btnPdf);
 
@@ -155,7 +158,7 @@ public class FinalizarPedidoWindow extends JFrame {
         if (pedido == null) return;
         model.setRowCount(0);
 
-        // Cuando cargamos filas programáticamente, queremos que el listener no reaccione (evita recalc múltiples)
+        // cargar filas sin activar listener múltiples
         model.removeTableModelListener(modelListener);
         List<Detalle> detalles = detalleDAO.findByPedidoId(pedido.getIdPedido());
         for (Detalle d : detalles) {
@@ -168,15 +171,12 @@ public class FinalizarPedidoWindow extends JFrame {
             row.add(0.0); // total por defecto
             model.addRow(row);
         }
-        // Volvemos a añadir listener y forzamos un recálculo final
         model.addTableModelListener(modelListener);
         recalcTotal();
     }
 
     private void recalcTotal() {
         double total = 0.0;
-        // No quitamos el listener aquí porque el listener solo reacciona a cambios en columnas 3 o 4,
-        // y aquí vamos a escribir en la columna 5 (Total) — por tanto NO disparará recalcTotal de nuevo.
         for (int r = 0; r < model.getRowCount(); r++) {
             Object cantObj = model.getValueAt(r, 3);
             Object precioObj = model.getValueAt(r, 4);
@@ -190,8 +190,7 @@ public class FinalizarPedidoWindow extends JFrame {
                 try { precio = Double.parseDouble(precioObj.toString()); } catch (Exception ignored) {}
             }
             double linea = cant * precio;
-            // escribimos el total en columna 5; esto NO debe volver a lanzar recalcTotal porque el listener filtra por columnas 3/4.
-            model.setValueAt(linea, r, 5);
+            model.setValueAt(linea, r, 5); // columna Total (no disparará recalc en nuestro listener)
             total += linea;
         }
         lblTotal.setText("Total: $" + MONEDA.format(total));
@@ -232,7 +231,12 @@ public class FinalizarPedidoWindow extends JFrame {
         if (chkDescontarStock.isSelected()) {
             for (Detalle d : detallesParaGuardar) {
                 if (d.getIdMaterial() != null && d.getCantidad() != null) {
-                    materialDAO.changeStock(d.getIdMaterial(), -d.getCantidad());
+                    try {
+                        materialDAO.changeStock(d.getIdMaterial(), -d.getCantidad());
+                    } catch (Exception ex) {
+                        // manejar/loguear error, pero seguimos
+                        ex.printStackTrace();
+                    }
                 }
             }
         }
@@ -246,32 +250,136 @@ public class FinalizarPedidoWindow extends JFrame {
     }
 
     /**
-     * Generación de PDF mediante reflexión (si PDFBox está en classpath).
-     * Si no está, mostrará un aviso solicitando añadir la dependencia.
+     * Genera PDF de la factura usando PDFBox (requiere pdfbox y fontbox en librerías).
      */
-    private void generarPdfConReflexion() throws Exception {
-        try {
-            Class.forName("org.apache.pdfbox.pdmodel.PDDocument");
-        } catch (ClassNotFoundException e) {
-            JOptionPane.showMessageDialog(this,
-                "Para exportar a PDF necesitás añadir Apache PDFBox a las librerías del proyecto.\n" +
-                "Ejemplo: pdfbox-2.0.xx.jar y fontbox-2.0.xx.jar (agregalos en Project → Properties → Libraries).",
-                "Falta dependencia", JOptionPane.WARNING_MESSAGE);
+    private void generarPdf() throws IOException {
+        if (model.getRowCount() == 0) {
+            JOptionPane.showMessageDialog(this, "No hay líneas para exportar.", "Info", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
         JFileChooser fc = new JFileChooser();
-        fc.setSelectedFile(new File("factura_pedido_" + (pedido.getIdPedido() != null ? pedido.getIdPedido() : "X") + ".pdf"));
+        fc.setSelectedFile(new File("factura_pedido_" + (pedido != null && pedido.getIdPedido()!=null ? pedido.getIdPedido() : "X") + ".pdf"));
         int opt = fc.showSaveDialog(this);
         if (opt != JFileChooser.APPROVE_OPTION) return;
         File outFile = fc.getSelectedFile();
 
-        // Para no repetir demasiado código aquí usamos la reflexión tal como en la versión anterior.
-        // (no la repito por brevedad — el bloque es el mismo que en la versión previa).
-        // Llamo al método de la versión anterior que maneja la reflexión (puedo extraerlo si querés).
-        // Reutilizá la versión que tenías antes si la cargaste con reflexión también.
-        // (Si querés que implemente la versión completa aquí, lo agrego).
-        // --- Implementación simplificada: aviso al usuario (si ya querés PDFBox lo implemento completo) ---
-        JOptionPane.showMessageDialog(this, "Generación PDF: si querés que lo haga ahora, decímelo y lo dejo completo aquí (usa PDFBox).", "Info", JOptionPane.INFORMATION_MESSAGE);
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage(PDRectangle.LETTER);
+            doc.addPage(page);
+
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                float margin = 50;
+                float yStart = page.getMediaBox().getHeight() - margin;
+                float x = margin;
+                float y = yStart;
+
+                cs.beginText();
+                PDType0Font font = PDType0Font.load(doc, new File("C:\\Windows\\Fonts\\arial.ttf"));
+cs.setFont(font, 12);
+                cs.newLineAtOffset(x, y);
+                cs.showText("FACTURA / COMPROBANTE - Pedido #" + (pedido != null && pedido.getIdPedido()!=null ? pedido.getIdPedido() : ""));
+                cs.endText();
+
+                y -= 25;
+                cs.beginText();
+               
+cs.setFont(font, 12);
+                cs.newLineAtOffset(x, y);
+                String clienteInfo = "Cliente: " + (pedido != null && pedido.getClienteNombre()!=null ? pedido.getClienteNombre() : "");
+                cs.showText(clienteInfo);
+                cs.endText();
+
+                y -= 20;
+                // encabezado tabla
+                cs.beginText();
+               cs.setFont(font, 12);
+                cs.newLineAtOffset(x, y);
+                cs.showText(String.format("%-6s %-30s %10s %12s %12s", "ID", "Material", "Cant.", "P.Unit", "Total"));
+                cs.endText();
+
+                y -= 15;
+                
+cs.setFont(font, 12);
+
+                double grandTotal = 0.0;
+                for (int r = 0; r < model.getRowCount(); r++) {
+                    if (y < 70) {
+                        // nueva página
+                        cs.close();
+                        page = new PDPage(PDRectangle.LETTER);
+                        doc.addPage(page);
+                        cs.close(); // just to be safe; but we always create a new stream in try-with-resources below
+                        try (PDPageContentStream cs2 = new PDPageContentStream(doc, page)) {
+                            // reassign cs for further writes (but we will continue the loop with cs2)
+                            // Simplificamos: abrir nuevo stream y write header text again
+                            y = page.getMediaBox().getHeight() - margin;
+                            cs2.beginText();
+                            
+cs.setFont(font, 12);
+                            cs2.newLineAtOffset(x, y);
+                            // write line then close cs2
+                            Object id = model.getValueAt(r, 0);
+                            Object material = model.getValueAt(r, 2);
+                            Object cant = model.getValueAt(r, 3);
+                            Object punit = model.getValueAt(r, 4);
+                            Object total = model.getValueAt(r, 5);
+                            String line = String.format("%-6s %-30s %10s %12s %12s",
+                                    id != null ? id.toString() : "",
+                                    material != null ? truncate(material.toString(),30) : "",
+                                    cant != null ? cant.toString() : "",
+                                    punit != null ? punit.toString() : "",
+                                    total != null ? total.toString() : "");
+                            cs2.showText(line);
+                            cs2.endText();
+                            grandTotal += parseDoubleSafely(model.getValueAt(r,5));
+                            y -= 15;
+                        }
+                    } else {
+                        cs.beginText();
+                        cs.newLineAtOffset(x, y);
+                        Object id = model.getValueAt(r, 0);
+                        Object material = model.getValueAt(r, 2);
+                        Object cant = model.getValueAt(r, 3);
+                        Object punit = model.getValueAt(r, 4);
+                        Object total = model.getValueAt(r, 5);
+                        String line = String.format("%-6s %-30s %10s %12s %12s",
+                                id != null ? id.toString() : "",
+                                material != null ? truncate(material.toString(),30) : "",
+                                cant != null ? cant.toString() : "",
+                                punit != null ? punit.toString() : "",
+                                total != null ? total.toString() : "");
+                        cs.showText(line);
+                        cs.endText();
+                        grandTotal += parseDoubleSafely(model.getValueAt(r,5));
+                        y -= 15;
+                    }
+                }
+
+                // total final
+                y -= 20;
+                cs.beginText();
+                
+cs.setFont(font, 12);
+                cs.newLineAtOffset(x, y);
+                cs.showText("TOTAL: $" + MONEDA.format(grandTotal));
+                cs.endText();
+            }
+
+            doc.save(outFile);
+        }
+
+        JOptionPane.showMessageDialog(this, "PDF generado: " + outFile.getAbsolutePath(), "Éxito", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max-3) + "...";
+    }
+
+    private static double parseDoubleSafely(Object o) {
+        if (o == null) return 0.0;
+        if (o instanceof Number) return ((Number) o).doubleValue();
+        try { return Double.parseDouble(o.toString()); } catch (Exception ex) { return 0.0; }
     }
 }
