@@ -5,22 +5,26 @@ import java.time.LocalDate;
 public class Pedido {
     private Long idPedido;
     private Long idCliente;
-    private String clienteNombre; // Para mostrar en las tablas
+    private String clienteNombre; // Para mostrar en las tablas (no persistido en la tabla pedidos)
     private LocalDate fechaPedido;
     private LocalDate fechaEntregaEstimada;
-    private Double kiloCantidad;
     private String estadoPedido;
+    private String formaCobro;
+    private Double kiloCantidad;
 
     public Pedido() {}
 
     public Pedido(Long idCliente, LocalDate fechaPedido, LocalDate fechaEntregaEstimada,
-                  Double kiloCantidad) {
+                  String estadoPedido, String formaCobro, Double kiloCantidad) {
         this.idCliente = idCliente;
         this.fechaPedido = fechaPedido;
         this.fechaEntregaEstimada = fechaEntregaEstimada;
+        this.estadoPedido = estadoPedido;
+        this.formaCobro = formaCobro;
         this.kiloCantidad = kiloCantidad;
     }
 
+    // Getters y setters
     public Long getIdPedido() { return idPedido; }
     public void setIdPedido(Long idPedido) { this.idPedido = idPedido; }
 
@@ -36,22 +40,23 @@ public class Pedido {
     public LocalDate getFechaEntregaEstimada() { return fechaEntregaEstimada; }
     public void setFechaEntregaEstimada(LocalDate fechaEntregaEstimada) { this.fechaEntregaEstimada = fechaEntregaEstimada; }
 
+    public String getEstadoPedido() { return estadoPedido; }
+    public void setEstadoPedido(String estadoPedido) { this.estadoPedido = estadoPedido; }
+
+    public String getFormaCobro() { return formaCobro; }
+    public void setFormaCobro(String formaCobro) { this.formaCobro = formaCobro; }
+
     public Double getKiloCantidad() { return kiloCantidad; }
     public void setKiloCantidad(Double kiloCantidad) { this.kiloCantidad = kiloCantidad; }
 
     @Override
     public String toString() {
-        if (clienteNombre != null) {
+        if (clienteNombre != null && idPedido != null) {
             return "Pedido #" + idPedido + " - " + clienteNombre;
         }
-        return "Pedido #" + idPedido;
+        if (idPedido != null) {
+            return "Pedido #" + idPedido;
+        }
+        return "Pedido (sin id)";
     }
-
-    public String getEstadoPedido() {
-    return estadoPedido;
 }
-public void setEstadoPedido(String estadoPedido) {
-    this.estadoPedido = estadoPedido;
-}
-    }
-

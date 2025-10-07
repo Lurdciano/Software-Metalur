@@ -32,8 +32,9 @@ public class PedidoService {
             throw new IllegalArgumentException("El ID del pedido es obligatorio para actualizar");
         }
         if (pedido.getIdCliente() == null) {
-            throw new IllegalArgumentException("El cliente (idCliente) es obligatorio");
-        }
+    throw new IllegalArgumentException("El cliente (idCliente) es obligatorio");
+}
+
         pedidoDAO.update(pedido);
     }
 

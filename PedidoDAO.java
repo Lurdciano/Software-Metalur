@@ -3,12 +3,8 @@ package com.cianmetalurgica.dao;
 import com.cianmetalurgica.config.DatabaseConnection;
 import com.cianmetalurgica.model.Pedido;
 import com.cianmetalurgica.model.Detalle;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Date;
+
+import java.sql.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,12 +13,15 @@ public class PedidoDAO {
 
     public PedidoDAO() {}
 
+    /**
+     * Lista pedidos (mínimo): id_pedido, id_cliente, nombre_razon_social (cliente), fecha_pedido
+     * Ajustado para no requerir columnas opcionales que tu BD no tenga.
+     */
     public List<Pedido> findAll() {
-        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, "
-                   + "p.fecha_pedido, p.fecha_entrega_estimada, p.kilo_cantidad "
-                   + "FROM pedidos p "
-                   + "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente "
-                   + "ORDER BY p.fecha_pedido DESC";
+        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, p.fecha_pedido " +
+                     "FROM pedidos p " +
+                     "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente " +
+                     "ORDER BY p.fecha_pedido DESC";
 
         List<Pedido> lista = new ArrayList<>();
         try (Connection conn = DatabaseConnection.getConnection();
@@ -39,12 +38,11 @@ public class PedidoDAO {
     }
 
     public List<Pedido> findByClienteName(String name) {
-        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, "
-                   + "p.fecha_pedido, p.fecha_entrega_estimada, p.kilo_cantidad "
-                   + "FROM pedidos p "
-                   + "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente "
-                   + "WHERE c.nombre_razon_social LIKE ? "
-                   + "ORDER BY p.fecha_pedido DESC";
+        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, p.fecha_pedido " +
+                     "FROM pedidos p " +
+                     "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente " +
+                     "WHERE c.nombre_razon_social LIKE ? " +
+                     "ORDER BY p.fecha_pedido DESC";
 
         List<Pedido> lista = new ArrayList<>();
         try (Connection conn = DatabaseConnection.getConnection();
@@ -63,11 +61,10 @@ public class PedidoDAO {
     }
 
     public Pedido findById(Long id) {
-        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, "
-                   + "p.fecha_pedido, p.fecha_entrega_estimada, p.kilo_cantidad "
-                   + "FROM pedidos p "
-                   + "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente "
-                   + "WHERE p.id_pedido = ?";
+        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, p.fecha_pedido " +
+                     "FROM pedidos p " +
+                     "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente " +
+                     "WHERE p.id_pedido = ?";
 
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -84,34 +81,91 @@ public class PedidoDAO {
         }
     }
 
+    /**
+     * Guarda pedido y sus detalles en una sola transacción.
+     * Inserta en la tabla pedidos únicamente las columnas mínimas: id_cliente, fecha_pedido.
+     * Luego inserta los detalles (tabla detalles). Si algo falla, hace rollback.
+     */
+    public void saveWithDetails(Pedido pedido, List<Detalle> detalles) {
+        String sqlInsertPedido = "INSERT INTO pedidos (id_cliente, fecha_pedido) VALUES (?, ?)";
+        String sqlInsertDetalle = "INSERT INTO detalles (id_pedido, id_material, material_tipo, cantidad, dimensiones_pieza, numero_cortes, peso_pieza) " +
+                                  "VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            // Insert pedido
+            try (PreparedStatement psPedido = conn.prepareStatement(sqlInsertPedido, Statement.RETURN_GENERATED_KEYS)) {
+                if (pedido.getIdCliente() != null) psPedido.setLong(1, pedido.getIdCliente());
+                else psPedido.setNull(1, Types.BIGINT);
+
+                if (pedido.getFechaPedido() != null) psPedido.setDate(2, Date.valueOf(pedido.getFechaPedido()));
+                else psPedido.setNull(2, Types.DATE);
+
+                int affected = psPedido.executeUpdate();
+                if (affected == 0) throw new SQLException("Insert pedido falló, no se creó ninguna fila.");
+
+                try (ResultSet gk = psPedido.getGeneratedKeys()) {
+                    if (gk.next()) pedido.setIdPedido(gk.getLong(1));
+                    else throw new SQLException("Insert pedido falló: no se obtuvo ID generado.");
+                }
+            }
+
+            // Insert detalles
+            if (detalles != null && !detalles.isEmpty()) {
+                try (PreparedStatement psDet = conn.prepareStatement(sqlInsertDetalle, Statement.RETURN_GENERATED_KEYS)) {
+                    for (Detalle d : detalles) {
+                        if (pedido.getIdPedido() != null) psDet.setLong(1, pedido.getIdPedido());
+                        else psDet.setNull(1, Types.BIGINT);
+
+                        if (d.getIdMaterial() != null) psDet.setLong(2, d.getIdMaterial()); else psDet.setNull(2, Types.BIGINT);
+                        psDet.setString(3, d.getMaterialTipo());
+                        if (d.getCantidad() != null) psDet.setInt(4, d.getCantidad()); else psDet.setNull(4, Types.INTEGER);
+                        psDet.setString(5, d.getDimensionesPieza());
+                        if (d.getNumeroCortes() != null) psDet.setInt(6, d.getNumeroCortes()); else psDet.setNull(6, Types.INTEGER);
+                        if (d.getPesoPieza() != null) psDet.setDouble(7, d.getPesoPieza()); else psDet.setNull(7, Types.DOUBLE);
+
+                        int af = psDet.executeUpdate();
+                        if (af == 0) throw new SQLException("Insert detalle falló, no se creó ninguna fila.");
+
+                        try (ResultSet gk = psDet.getGeneratedKeys()) {
+                            if (gk.next()) d.setIdDetalle(gk.getLong(1));
+                        }
+                    }
+                }
+            }
+
+            conn.commit();
+        } catch (SQLException ex) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException r) { r.printStackTrace(); }
+            }
+            throw new RuntimeException("Error guardando pedidos y detalles: " + ex.getMessage(), ex);
+        } finally {
+            if (conn != null) {
+                try { conn.setAutoCommit(true); conn.close(); } catch (SQLException e) { /* ignore */ }
+            }
+        }
+    }
+
+    /**
+     * Guarda pedido simple (legacy) usando solo columnas mínimas.
+     */
     public void save(Pedido pedido) {
-        String sql = "INSERT INTO pedidos (id_cliente, fecha_pedido, fecha_entrega_estimada, kilo_cantidad) "
-                   + "VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO pedidos (id_cliente, fecha_pedido) VALUES (?, ?)";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 
-            ps.setLong(1, pedido.getIdCliente());
-            ps.setDate(2, pedido.getFechaPedido() != null ? Date.valueOf(pedido.getFechaPedido()) : Date.valueOf(LocalDate.now()));
-            if (pedido.getFechaEntregaEstimada() != null) {
-                ps.setDate(3, Date.valueOf(pedido.getFechaEntregaEstimada()));
-            } else {
-                ps.setNull(3, java.sql.Types.DATE);
-            }
-            if (pedido.getKiloCantidad() != null) {
-                ps.setDouble(4, pedido.getKiloCantidad());
-            } else {
-                ps.setNull(4, java.sql.Types.DOUBLE);
-            }
+            if (pedido.getIdCliente() != null) ps.setLong(1, pedido.getIdCliente()); else ps.setNull(1, Types.BIGINT);
+            if (pedido.getFechaPedido() != null) ps.setDate(2, Date.valueOf(pedido.getFechaPedido())); else ps.setNull(2, Types.DATE);
 
             int affected = ps.executeUpdate();
-            if (affected == 0) {
-                throw new SQLException("Insert de pedido falló, no se creó ninguna fila.");
-            }
+            if (affected == 0) throw new SQLException("Insert de pedido falló, no se creó ninguna fila.");
 
             try (ResultSet generatedKeys = ps.getGeneratedKeys()) {
-                if (generatedKeys.next()) {
-                    pedido.setIdPedido(generatedKeys.getLong(1));
-                }
+                if (generatedKeys.next()) pedido.setIdPedido(generatedKeys.getLong(1));
             }
         } catch (SQLException ex) {
             throw new RuntimeException("Error en save Pedido: " + ex.getMessage(), ex);
@@ -119,24 +173,16 @@ public class PedidoDAO {
     }
 
     public void update(Pedido pedido) {
-        String sql = "UPDATE pedidos SET id_cliente = ?, fecha_pedido = ?, fecha_entrega_estimada = ?, kilo_cantidad = ? WHERE id_pedido = ?";
+        String sql = "UPDATE pedidos SET id_cliente = ?, fecha_pedido = ? WHERE id_pedido = ?";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setLong(1, pedido.getIdCliente());
-            ps.setDate(2, pedido.getFechaPedido() != null ? Date.valueOf(pedido.getFechaPedido()) : null);
-            if (pedido.getFechaEntregaEstimada() != null) {
-                ps.setDate(3, Date.valueOf(pedido.getFechaEntregaEstimada()));
-            } else {
-                ps.setNull(3, java.sql.Types.DATE);
-            }
-            if (pedido.getKiloCantidad() != null) ps.setDouble(4, pedido.getKiloCantidad()); else ps.setNull(4, java.sql.Types.DOUBLE);
-            ps.setLong(5, pedido.getIdPedido());
+            if (pedido.getIdCliente() != null) ps.setLong(1, pedido.getIdCliente()); else ps.setNull(1, Types.BIGINT);
+            if (pedido.getFechaPedido() != null) ps.setDate(2, Date.valueOf(pedido.getFechaPedido())); else ps.setNull(2, Types.DATE);
+            ps.setLong(3, pedido.getIdPedido());
 
             int affected = ps.executeUpdate();
-            if (affected == 0) {
-                throw new SQLException("Update de pedido falló, id no encontrado: " + pedido.getIdPedido());
-            }
+            if (affected == 0) throw new SQLException("Update de pedido falló, id no encontrado: " + pedido.getIdPedido());
         } catch (SQLException ex) {
             throw new RuntimeException("Error en update Pedido: " + ex.getMessage(), ex);
         }
@@ -155,11 +201,10 @@ public class PedidoDAO {
     }
 
     public List<Pedido> findByClientId(Long clientId) {
-        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, "
-                   + "p.fecha_pedido, p.fecha_entrega_estimada, p.kilo_cantidad "
-                   + "FROM pedidos p "
-                   + "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente "
-                   + "WHERE p.id_cliente = ? ORDER BY p.fecha_pedido DESC";
+        String sql = "SELECT p.id_pedido, p.id_cliente, c.nombre_razon_social AS cliente_nombre, p.fecha_pedido " +
+                     "FROM pedidos p " +
+                     "LEFT JOIN clientes c ON p.id_cliente = c.id_cliente " +
+                     "WHERE p.id_cliente = ? ORDER BY p.fecha_pedido DESC";
 
         List<Pedido> lista = new ArrayList<>();
         try (Connection conn = DatabaseConnection.getConnection();
@@ -177,7 +222,6 @@ public class PedidoDAO {
         }
     }
 
-    // ---------- Helpers ----------
     private Pedido mapResultSetToPedido(ResultSet rs) throws SQLException {
         Pedido p = new Pedido();
         p.setIdPedido(rs.getLong("id_pedido"));
@@ -187,73 +231,23 @@ public class PedidoDAO {
         p.setIdCliente(idCliente);
 
         String clienteNombre = null;
-        try {
-            clienteNombre = rs.getString("cliente_nombre");
-        } catch (SQLException e) {
-            clienteNombre = null;
-        }
+        try { clienteNombre = rs.getString("cliente_nombre"); } catch (SQLException e) { clienteNombre = null; }
         p.setClienteNombre(clienteNombre);
 
-        Date fechaPedidoSql = rs.getDate("fecha_pedido");
+        Date fechaPedidoSql = null;
+        try { fechaPedidoSql = rs.getDate("fecha_pedido"); } catch (SQLException e) { fechaPedidoSql = null; }
         if (fechaPedidoSql != null) p.setFechaPedido(fechaPedidoSql.toLocalDate());
 
-        Date fechaEntregaSql = rs.getDate("fecha_entrega_estimada");
-        if (fechaEntregaSql != null) p.setFechaEntregaEstimada(fechaEntregaSql.toLocalDate());
-
-        double kilo = rs.getDouble("kilo_cantidad");
-        if (!rs.wasNull()) p.setKiloCantidad(kilo); else p.setKiloCantidad(null);
+        // Como la DB puede no contener columnas opcionales, las dejamos null
+        p.setEstadoPedido(null);
+        p.setFormaCobro(null);
+        p.setKiloCantidad(null);
+        p.setFechaEntregaEstimada(null);
 
         return p;
     }
-    
+
     public void saveWithDetalles(Pedido pedido, List<Detalle> detalles) {
-    String sqlPedido = "INSERT INTO pedidos (id_cliente, fecha_pedido, fecha_entrega_estimada, kilo_cantidad) VALUES (?, ?, ?, ?)";
-    DetalleDAO detalleDAO = new DetalleDAO();
-
-    Connection conn = null;
-    try {
-        conn = DatabaseConnection.getConnection();
-        conn.setAutoCommit(false); // iniciar transacción
-
-        // Insert pedido y obtener id
-        try (PreparedStatement ps = conn.prepareStatement(sqlPedido, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setLong(1, pedido.getIdCliente());
-            ps.setDate(2, pedido.getFechaPedido() != null ? Date.valueOf(pedido.getFechaPedido()) : Date.valueOf(LocalDate.now()));
-            if (pedido.getFechaEntregaEstimada() != null) ps.setDate(3, Date.valueOf(pedido.getFechaEntregaEstimada())); else ps.setNull(3, java.sql.Types.DATE);
-            if (pedido.getKiloCantidad() != null) ps.setDouble(4, pedido.getKiloCantidad()); else ps.setNull(4, java.sql.Types.DOUBLE);
-
-            int affected = ps.executeUpdate();
-            if (affected == 0) {
-                throw new SQLException("Insert de pedido falló, no se creó ninguna fila.");
-            }
-            try (ResultSet rs = ps.getGeneratedKeys()) {
-                if (rs.next()) {
-                    pedido.setIdPedido(rs.getLong(1));
-                } else {
-                    throw new SQLException("No se obtuvo id generado para pedido.");
-                }
-            }
-        }
-
-        // Insertar cada detalle usando la misma conexión
-        if (detalles != null) {
-            for (Detalle d : detalles) {
-                d.setIdPedido(pedido.getIdPedido()); // asignar FK
-                detalleDAO.saveWithConnection(d, conn);
-            }
-        }
-
-        conn.commit();
-    } catch (SQLException ex) {
-        if (conn != null) {
-            try { conn.rollback(); } catch (SQLException e) { /* log */ }
-        }
-        throw new RuntimeException("Error en saveWithDetalles Pedido: " + ex.getMessage(), ex);
-    } finally {
-        if (conn != null) {
-            try { conn.setAutoCommit(true); conn.close(); } catch (SQLException e) { /* log */ }
-        }
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
-}
-    
 }
