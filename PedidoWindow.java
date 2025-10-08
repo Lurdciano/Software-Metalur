@@ -1,5 +1,6 @@
 package com.cianmetalurgica.view;
 
+import com.cianmetalurgica.config.DatabaseConnection;
 import com.cianmetalurgica.dao.ClienteDAO;
 import com.cianmetalurgica.dao.DetalleDAO;
 import com.cianmetalurgica.dao.MaterialDAO;
@@ -29,32 +30,30 @@ public class PedidoWindow extends JFrame {
     private PedidoDAO pedidoDAO;
     private ClienteDAO clienteDAO;
     private MaterialDAO materialDAO;
-    private DetalleDAO detalleDAO;
-
     private String mode; // "LIST", "CREATE", "SEARCH", "EDIT"
     private JFrame parent;
     private Pedido pedidoToEdit;
 
-    // Form (create/edit)
+    // componentes form (cabecera)
     private JComboBox<Cliente> cmbCliente;
     private JTextField txtFechaPedido;
 
-    // Material / lines
+    // material / lineas (CREATE/EDIT)
     private JComboBox<Material> cmbMaterial;
     private JTextField txtCantidadLinea;
     private JTextField txtDimensionesLinea;
     private JTextField txtCortesLinea;
     private JTextField txtPesoLinea;
     private JButton btnAgregarLinea;
+    private JTable table; // tabla de líneas (pedido en edición/creación)
+    private DefaultTableModel tableModel;
 
-    // Tabla de líneas (líneas del pedido)
-    private JTable lineasTable;
-    private DefaultTableModel lineasTableModel;
-
-    // Tabla de pedidos (lista / búsqueda)
+    // Lista/Buscar pedidos (LIST/SEARCH)
     private JTable pedidosTable;
     private DefaultTableModel pedidosTableModel;
     private JTextField txtBuscar;
+
+    private DetalleDAO detalleDAO;
 
     public PedidoWindow(JFrame parent, String mode) {
         this.parent = parent;
@@ -67,13 +66,10 @@ public class PedidoWindow extends JFrame {
         initComponents();
         setupLayout();
 
-        // si estamos en modo lista o búsqueda, aseguramos y cargamos datos
+        // cargar datos según modo
         if ("LIST".equals(mode) || "SEARCH".equals(mode)) {
-            ensureListPanelIfNeeded();
             loadData();
         }
-
-        // si queremos crear/editar cargamos recursos necesarios
         if ("CREATE".equals(mode) || "EDIT".equals(mode)) {
             loadClientes();
             loadMaterials();
@@ -84,17 +80,21 @@ public class PedidoWindow extends JFrame {
         this(parent, mode);
         this.pedidoToEdit = pedido;
         if ("EDIT".equals(mode) && pedido != null) {
+            // ensure UI components created and combos loaded
+            loadClientes();
+            loadMaterials();
             fillFormWithPedido(pedido);
         }
     }
 
-    // Constructor auxiliar si tu MainWindow pasa MaterialWindow.Mode
+    // Constructor helper para compatibilidad con MaterialWindow.Mode enum
     public PedidoWindow(JFrame parent, MaterialWindow.Mode mode) {
         this(parent, mode != null ? mode.name() : "LIST");
     }
 
     private void initComponents() {
-        setTitle("Cian Metalúrgica - " + ("CREATE".equals(mode) ? "Nuevo Pedido" : "Pedidos"));
+        setTitle("Cian Metalúrgica - " + ("CREATE".equals(mode) ? "Nuevo Pedido" :
+                ("EDIT".equals(mode) ? "Editar Pedido" : "Lista de Pedidos")));
         setSize(1000, 700);
         setLocationRelativeTo(parent);
         getContentPane().setBackground(BACKGROUND_COLOR);
@@ -114,16 +114,19 @@ public class PedidoWindow extends JFrame {
         headerPanel.add(titleLabel);
         add(headerPanel, BorderLayout.NORTH);
 
-        // Center: dependiendo del modo
+        // Content
         if ("LIST".equals(mode) || "SEARCH".equals(mode)) {
             add(createListPanel(), BorderLayout.CENTER);
-        } else {
+        } else { // CREATE or EDIT
             add(createFormPanel(), BorderLayout.CENTER);
         }
 
         add(createButtonPanel(), BorderLayout.SOUTH);
     }
 
+    // ------------------------
+    // PANEL: FORM (CREATE/EDIT)
+    // ------------------------
     private JPanel createFormPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(BACKGROUND_COLOR);
@@ -141,7 +144,7 @@ public class PedidoWindow extends JFrame {
         top.add(new JLabel("Cliente *:"), gbc);
         gbc.gridx = 1;
         cmbCliente = new JComboBox<>();
-        cmbCliente.setPreferredSize(new Dimension(320, 25));
+        cmbCliente.setPreferredSize(new Dimension(300, 25));
         top.add(cmbCliente, gbc);
 
         // Fecha pedido
@@ -170,7 +173,7 @@ public class PedidoWindow extends JFrame {
         g2.gridx = 0; g2.gridy = 0; formLine.add(new JLabel("Material:"), g2);
         g2.gridx = 1;
         cmbMaterial = new JComboBox<>();
-        cmbMaterial.setPreferredSize(new Dimension(300,25));
+        cmbMaterial.setPreferredSize(new Dimension(250,25));
         formLine.add(cmbMaterial, g2);
 
         g2.gridx = 2; formLine.add(new JLabel("Cantidad:"), g2);
@@ -202,22 +205,34 @@ public class PedidoWindow extends JFrame {
 
         center.add(formLine, BorderLayout.NORTH);
 
-        // Tabla de líneas
-        String[] cols = {"ID_DETALLE","ID_MATERIAL","Material","Cantidad","Dimensiones","Cortes","Peso"};
-        lineasTableModel = new DefaultTableModel(cols, 0) {
-            @Override public boolean isCellEditable(int row, int col) {
-                // permitir editar cantidad, dimensiones, cortes, peso en la tabla si se quiere
-                return col == 3 || col == 4 || col == 5 || col == 6;
+        // Tabla de líneas (CREATE/EDIT)
+        String[] cols = {"ID_DETALLE","ID_MATERIAL","Material","Cantidad","Dimensiones","Cortes","Peso","Descontar"};
+        tableModel = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int col) {
+                // permitir editar: Cantidad, Dimensiones, Cortes, Peso, Descontar
+                return col == 3 || col == 4 || col == 5 || col == 6 || col == 7;
             }
-            @Override public Class<?> getColumnClass(int col) {
-                if (col == 3) return Integer.class;
-                if (col == 6) return Double.class;
-                return Object.class;
+
+            @Override
+            public Class<?> getColumnClass(int col) {
+                // cols = {"ID_DETALLE","ID_MATERIAL","Material","Cantidad","Dimensiones","Cortes","Peso","Descontar"};
+                switch (col) {
+                    case 0: return Long.class;    // ID_DETALLE
+                    case 1: return Long.class;    // ID_MATERIAL
+                    case 2: return String.class;  // Material (nombre)
+                    case 3: return Integer.class; // Cantidad
+                    case 4: return String.class;  // Dimensiones
+                    case 5: return Integer.class; // Cortes
+                    case 6: return Double.class;  // Peso
+                    case 7: return Boolean.class; // Descontar
+                    default: return Object.class;
+                }
             }
         };
-        lineasTable = new JTable(lineasTableModel);
-        lineasTable.setRowHeight(24);
-        JScrollPane sp = new JScrollPane(lineasTable);
+        table = new JTable(tableModel);
+        table.setRowHeight(24);
+        JScrollPane sp = new JScrollPane(table);
         sp.setBorder(BorderFactory.createTitledBorder("Líneas del pedido"));
         center.add(sp, BorderLayout.CENTER);
 
@@ -226,6 +241,9 @@ public class PedidoWindow extends JFrame {
         return panel;
     }
 
+    // ------------------------
+    // PANEL: LIST / SEARCH
+    // ------------------------
     private JPanel createListPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(BACKGROUND_COLOR);
@@ -242,19 +260,27 @@ public class PedidoWindow extends JFrame {
             panel.add(searchPanel, BorderLayout.NORTH);
         }
 
-        // tabla general de pedidos (simple)
+        // tabla general de pedidos: referencia de clase para updateTable
         String[] columns = {"ID", "Cliente", "Fecha Pedido"};
         pedidosTableModel = new DefaultTableModel(columns, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
+            @Override public Class<?> getColumnClass(int columnIndex) {
+                if (columnIndex == 0) return Long.class;
+                return Object.class;
+            }
         };
         pedidosTable = new JTable(pedidosTableModel);
         pedidosTable.setRowHeight(24);
+        pedidosTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 12));
         JScrollPane scroll = new JScrollPane(pedidosTable);
         panel.add(scroll, BorderLayout.CENTER);
 
         return panel;
     }
 
+    // ------------------------
+    // BUTTONS PANEL
+    // ------------------------
     private JPanel createButtonPanel() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         panel.setBackground(BACKGROUND_COLOR);
@@ -293,18 +319,9 @@ public class PedidoWindow extends JFrame {
         return button;
     }
 
-    private void ensureListPanelIfNeeded() {
-        // Si estamos en modo lista/ búsqueda y la tabla de pedidos no existe, creamos el panel de lista
-        if (!("LIST".equals(mode) || "SEARCH".equals(mode))) return;
-        if (pedidosTableModel != null) return;
-
-        // Removemos cualquier centro actual y ponemos el panel de lista
-        getContentPane().removeAll();
-        setupLayout(); // reconstruye la UI con lista en el centro
-        validate();
-        repaint();
-    }
-
+    // ------------------------
+    // LOADERS
+    // ------------------------
     private void loadClientes() {
         try {
             List<Cliente> clientes = clienteDAO.findAll();
@@ -351,14 +368,16 @@ public class PedidoWindow extends JFrame {
         }
 
         Vector<Object> row = new Vector<>();
-        row.add(null); // id_detalle (se genera en BD)
-        row.add(m.getIdMaterial());
-        row.add(m.getTipo()); // materialTipo (nombre)
-        row.add(cantidad);
-        row.add(dim);
-        row.add(cortes);
-        row.add(peso);
-        lineasTableModel.addRow(row);
+        row.add(null); // id_detalle
+        row.add(m.getIdMaterial());        // id_material (Long)
+        row.add(m.getTipo());             // materialTipo (String)
+        row.add(cantidad);                // cantidad (Integer)
+        row.add(dim);                     // dimensiones (String)
+        row.add(cortes);                  // cortes (Integer)
+        row.add(peso);                    // peso (Double)
+        row.add(Boolean.FALSE);           // descontar (Boolean) por defecto
+
+        tableModel.addRow(row);
 
         // limpiar inputs
         txtCantidadLinea.setText("");
@@ -367,6 +386,9 @@ public class PedidoWindow extends JFrame {
         txtPesoLinea.setText("");
     }
 
+    // ------------------------
+    // GUARDAR PEDIDO + DETALLES (usa pedidoDAO.saveWithDetails)
+    // ------------------------
     private void savePedido() {
         try {
             if (cmbCliente.getSelectedItem() == null) {
@@ -374,7 +396,7 @@ public class PedidoWindow extends JFrame {
                 return;
             }
 
-            // crear pedido (sólo id_cliente y fecha_pedido)
+            // crear pedido
             Pedido p = new Pedido();
             Cliente c = (Cliente) cmbCliente.getSelectedItem();
             p.setIdCliente(c.getIdCliente());
@@ -382,32 +404,52 @@ public class PedidoWindow extends JFrame {
 
             // construir lista de detalles desde la tabla
             List<Detalle> detalles = new ArrayList<>();
-            for (int r = 0; r < lineasTableModel.getRowCount(); r++) {
+            for (int r = 0; r < tableModel.getRowCount(); r++) {
                 Detalle d = new Detalle();
-                Object idMatObj = lineasTableModel.getValueAt(r, 1);
+
+                Object idMatObj = tableModel.getValueAt(r, 1);
                 if (idMatObj instanceof Number) d.setIdMaterial(((Number) idMatObj).longValue());
-                d.setMaterialTipo(lineasTableModel.getValueAt(r, 2) != null ? lineasTableModel.getValueAt(r, 2).toString() : null);
-                Object cantObj = lineasTableModel.getValueAt(r, 3);
+                else if (idMatObj instanceof String) {
+                    try { d.setIdMaterial(Long.parseLong((String) idMatObj)); } catch (NumberFormatException ex) { d.setIdMaterial(null); }
+                }
+
+                d.setMaterialTipo(tableModel.getValueAt(r, 2) != null ? tableModel.getValueAt(r, 2).toString() : null);
+
+                Object cantObj = tableModel.getValueAt(r, 3);
                 if (cantObj instanceof Number) d.setCantidad(((Number) cantObj).intValue());
                 else if (cantObj != null && !cantObj.toString().trim().isEmpty()) d.setCantidad(Integer.parseInt(cantObj.toString()));
-                d.setDimensionesPieza(lineasTableModel.getValueAt(r, 4) != null ? lineasTableModel.getValueAt(r, 4).toString() : null);
-                Object cortesObj = lineasTableModel.getValueAt(r, 5);
+
+                d.setDimensionesPieza(tableModel.getValueAt(r, 4) != null ? tableModel.getValueAt(r, 4).toString() : null);
+
+                Object cortesObj = tableModel.getValueAt(r, 5);
                 if (cortesObj instanceof Number) d.setNumeroCortes(((Number) cortesObj).intValue());
                 else if (cortesObj != null && !cortesObj.toString().trim().isEmpty()) d.setNumeroCortes(Integer.parseInt(cortesObj.toString()));
-                Object pesoObj = lineasTableModel.getValueAt(r, 6);
+
+                Object pesoObj = tableModel.getValueAt(r, 6);
                 if (pesoObj instanceof Number) d.setPesoPieza(((Number) pesoObj).doubleValue());
                 else if (pesoObj != null && !pesoObj.toString().trim().isEmpty()) d.setPesoPieza(Double.parseDouble(pesoObj.toString()));
+
+                // Leer la columna Descontar (index 7)
+                Object descontarObj = tableModel.getValueAt(r, 7);
+                boolean descontar = false;
+                if (descontarObj instanceof Boolean) descontar = (Boolean) descontarObj;
+                else if (descontarObj instanceof Number) descontar = ((Number) descontarObj).intValue() != 0;
+                else if (descontarObj instanceof String) descontar = "1".equals(descontarObj) || "true".equalsIgnoreCase((String)descontarObj);
+
+                // Mapear a entero 0/1 si tu modelo lo espera
+                d.setDescontarStock(descontar ? 1 : 0);
+
+                d.setIdPedido(null); // será asignado por saveWithDetails cuando se inserte el pedido
+
                 detalles.add(d);
             }
 
-            // Validaciones mínimas
             if (detalles.isEmpty()) {
                 showWarningMessage("Debe agregar al menos una línea al pedido");
                 return;
             }
 
-            // Guardar pedido + detalles (transaccional)
-            // Nota: pide que PedidoDAO tenga saveWithDetails(Pedido, List<Detalle>)
+            // Guardar transaccionalmente (asegurate que pedidoDAO.saveWithDetails exista y funcione)
             pedidoDAO.saveWithDetails(p, detalles);
 
             showSuccessMessage("Pedido guardado correctamente (ID: " + p.getIdPedido() + ")");
@@ -419,7 +461,137 @@ public class PedidoWindow extends JFrame {
     }
 
     private void updatePedido() {
-        showWarningMessage("Funcionalidad de actualizar no implementada en esta versión.");
+        try {
+            if (pedidoToEdit == null) {
+                showWarningMessage("No hay pedido seleccionado para editar");
+                return;
+            }
+
+            // actualizar datos generales del pedido si hubiera (aquí sólo fecha y cliente)
+            if (cmbCliente.getSelectedItem() == null) {
+                showWarningMessage("Debe seleccionar un cliente");
+                return;
+            }
+            Cliente c = (Cliente) cmbCliente.getSelectedItem();
+            pedidoToEdit.setIdCliente(c.getIdCliente());
+            try {
+                pedidoToEdit.setFechaPedido(LocalDate.parse(txtFechaPedido.getText().trim(), DATE_FORMATTER));
+            } catch (Exception ex) {
+                showWarningMessage("Fecha inválida. Use dd/MM/yyyy");
+                return;
+            }
+
+            // Armamos la lista de detalles tomando los valores de la tabla
+            List<Detalle> detalles = new ArrayList<>();
+            for (int r = 0; r < tableModel.getRowCount(); r++) {
+                try {
+                    Detalle d = new Detalle();
+
+                    Object idDetalleObj = tableModel.getValueAt(r, 0);
+                    Object idMaterialObj = tableModel.getValueAt(r, 1);
+                    Object materialTipoObj = tableModel.getValueAt(r, 2);
+                    Object cantidadObj = tableModel.getValueAt(r, 3);
+                    Object dimensionesObj = tableModel.getValueAt(r, 4);
+                    Object cortesObj = tableModel.getValueAt(r, 5);
+                    Object pesoObj = tableModel.getValueAt(r, 6);
+                    Object descontarObj = tableModel.getValueAt(r, 7);
+
+                    // idDetalle (si existe)
+                    Long idDetalle = toLongSafe(idDetalleObj);
+                    if (idDetalle != null) d.setIdDetalle(idDetalle);
+
+                    // idMaterial
+                    Long idMaterial = toLongSafe(idMaterialObj);
+                    if (idMaterial == null) {
+                        throw new IllegalArgumentException("Fila " + (r+1) + ": id_material inválido -> " + String.valueOf(idMaterialObj));
+                    }
+                    d.setIdMaterial(idMaterial);
+
+                    // materialTipo (nombre)
+                    d.setMaterialTipo(materialTipoObj != null ? materialTipoObj.toString() : null);
+
+                    // cantidad
+                    Integer cantidad = toIntegerSafe(cantidadObj);
+                    d.setCantidad(cantidad);
+
+                    // dimensiones
+                    d.setDimensionesPieza(dimensionesObj != null ? dimensionesObj.toString() : null);
+
+                    // cortes
+                    Integer cortes = toIntegerSafe(cortesObj);
+                    d.setNumeroCortes(cortes);
+
+                    // peso
+                    Double peso = toDoubleSafe(pesoObj);
+                    d.setPesoPieza(peso);
+
+                    // descontar
+                    boolean descontar = false;
+                    if (descontarObj instanceof Boolean) descontar = (Boolean) descontarObj;
+                    else if (descontarObj instanceof Number) descontar = ((Number) descontarObj).intValue() != 0;
+                    else if (descontarObj instanceof String) descontar = "1".equals(descontarObj) || "true".equalsIgnoreCase((String)descontarObj);
+                    d.setDescontarStock(descontar ? 1 : 0);
+
+                    // Setear id_pedido
+                    d.setIdPedido(pedidoToEdit.getIdPedido());
+
+                    detalles.add(d);
+                } catch (NumberFormatException nf) {
+                    showErrorMessage("Error en fila " + (r+1) + ": valor numérico inválido (" + nf.getMessage() + ")");
+                    return;
+                } catch (IllegalArgumentException ia) {
+                    showErrorMessage("Error en fila " + (r+1) + ": " + ia.getMessage());
+                    return;
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    showErrorMessage("Error procesando la fila " + (r+1) + ": " + ex.getMessage());
+                    return;
+                }
+            }
+
+            if (detalles.isEmpty()) {
+                showWarningMessage("Debe haber al menos una línea en el pedido.");
+                return;
+            }
+
+            // Aquí deberías tener un método transaccional que actualice pedido y sus detalles,
+            // por ejemplo pedidoDAO.updateWithDetails(pedidoToEdit, detalles);
+            pedidoDAO.updateWithDetails(pedidoToEdit, detalles);
+
+            showSuccessMessage("Pedido actualizado correctamente.");
+            dispose();
+        } catch (Exception e) {
+            e.printStackTrace();
+            showErrorMessage("Error actualizando pedido: " + e.getMessage());
+        }
+    }
+
+    // ---------- helpers seguros ----------
+    private Long toLongSafe(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number) return ((Number) o).longValue();
+        if (o instanceof String) {
+            String s = ((String) o).trim();
+            if (s.isEmpty()) return null;
+            try { return Long.parseLong(s); } catch (NumberFormatException ex) { return null; }
+        }
+        return null;
+    }
+
+    private Integer toIntegerSafe(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number) return ((Number) o).intValue();
+        String s = o.toString().trim();
+        if (s.isEmpty()) return null;
+        return Integer.parseInt(s);
+    }
+
+    private Double toDoubleSafe(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number) return ((Number) o).doubleValue();
+        String s = o.toString().trim();
+        if (s.isEmpty()) return null;
+        return Double.parseDouble(s);
     }
 
     private void performSearch() {
@@ -435,12 +607,7 @@ public class PedidoWindow extends JFrame {
             } else {
                 pedidos = pedidoDAO.findByClienteName(searchText);
             }
-            if (pedidos == null || pedidos.isEmpty()) {
-                if (pedidosTableModel != null) pedidosTableModel.setRowCount(0);
-                showWarningMessage("No se encontraron pedidos para: " + searchText);
-            } else {
-                updatePedidosTable(pedidos);
-            }
+            updateTable(pedidos);
         } catch (Exception e) {
             e.printStackTrace();
             showErrorMessage("Error al realizar la búsqueda: " + e.getMessage());
@@ -451,11 +618,11 @@ public class PedidoWindow extends JFrame {
         try {
             List<Pedido> pedidos = pedidoDAO.findAll();
             if (pedidos == null || pedidos.isEmpty()) {
-                if (pedidosTableModel != null) pedidosTableModel.setRowCount(0);
+                pedidosTableModel.setRowCount(0);
                 System.out.println("loadData: no hay pedidos");
             } else {
                 System.out.println("loadData: pedidos encontrados = " + pedidos.size());
-                updatePedidosTable(pedidos);
+                updateTable(pedidos);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -463,49 +630,63 @@ public class PedidoWindow extends JFrame {
         }
     }
 
-    private void updatePedidosTable(List<Pedido> pedidos) {
+    // ------------------------
+    // TABLA: actualizar visualmente la tabla de pedidos (LIST)
+    // ------------------------
+    private void updateTable(List<Pedido> pedidos) {
         if (pedidosTableModel == null) {
-            System.err.println("updatePedidosTable: pedidosTableModel es null");
+            System.err.println("updateTable: pedidosTableModel es null");
             return;
         }
-        pedidosTableModel.setRowCount(0);
-        if (pedidos == null) return;
+        try {
+            pedidosTableModel.setRowCount(0);
+            if (pedidos == null || pedidos.isEmpty()) return;
 
-        for (Pedido pedido : pedidos) {
-            String clienteNombre = pedido.getClienteNombre() != null ? pedido.getClienteNombre() : "";
-            String fechaPedidoStr = pedido.getFechaPedido() != null ? pedido.getFechaPedido().format(DATE_FORMATTER) : "";
-            Object[] row = { pedido.getIdPedido(), clienteNombre, fechaPedidoStr };
-            pedidosTableModel.addRow(row);
+            for (Pedido pedido : pedidos) {
+                Object[] row = new Object[] {
+                        pedido.getIdPedido(),
+                        pedido.getClienteNombre() != null ? pedido.getClienteNombre() : "",
+                        pedido.getFechaPedido() != null ? pedido.getFechaPedido().format(DATE_FORMATTER) : ""
+                };
+                pedidosTableModel.addRow(row);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            showErrorMessage("Error actualizando la tabla de pedidos: " + ex.getMessage());
         }
     }
 
+    // ------------------------
+    // UTIL / acciones sobre la lista
+    // ------------------------
     private void clearForm() {
-        if (cmbCliente != null) cmbCliente.setSelectedIndex(-1);
-        if (txtFechaPedido != null) txtFechaPedido.setText(LocalDate.now().format(DATE_FORMATTER));
-        if (lineasTableModel != null) lineasTableModel.setRowCount(0);
+        cmbCliente.setSelectedIndex(-1);
+        txtFechaPedido.setText(LocalDate.now().format(DATE_FORMATTER));
+        if (tableModel != null) tableModel.setRowCount(0);
     }
 
     private void editSelected() {
-        // Implementar si se quiere abrir ventana EDIT con pedido seleccionado
-        showWarningMessage("Editar pedido no implementado (seleccione una fila y luego implementar).");
+        int selected = pedidosTable.getSelectedRow();
+        if (selected == -1) { showWarningMessage("Seleccione un pedido para editar"); return; }
+        Object idObj = pedidosTableModel.getValueAt(selected, 0);
+        if (idObj == null) { showErrorMessage("ID inválido"); return; }
+        long id = (idObj instanceof Number) ? ((Number) idObj).longValue() : Long.parseLong(idObj.toString());
+        Pedido p = pedidoDAO.findById(id);
+        if (p == null) { showErrorMessage("Pedido no encontrado: " + id); return; }
+        new PedidoWindow(this, "EDIT", p).setVisible(true);
     }
 
     private void deleteSelected() {
-        int sel = -1;
-        if (pedidosTable != null) sel = pedidosTable.getSelectedRow();
-        if (sel == -1) { showWarningMessage("Seleccione un pedido para eliminar"); return; }
-
-        Object idObj = pedidosTableModel.getValueAt(sel, 0);
-        Long id = (idObj instanceof Number) ? ((Number) idObj).longValue() : Long.valueOf(idObj.toString());
-        int option = JOptionPane.showConfirmDialog(this, "¿Confirma eliminar pedido ID " + id + "?", "Confirmar", JOptionPane.YES_NO_OPTION);
-        if (option == JOptionPane.YES_OPTION) {
-            try {
-                pedidoDAO.delete(id);
-                showSuccessMessage("Pedido eliminado");
-                loadData();
-            } catch (Exception e) {
-                showErrorMessage("Error al eliminar pedido: " + e.getMessage());
-            }
+        int selected = pedidosTable.getSelectedRow();
+        if (selected == -1) { showWarningMessage("Seleccione un pedido para eliminar"); return; }
+        Object idObj = pedidosTableModel.getValueAt(selected, 0);
+        if (idObj == null) { showErrorMessage("ID inválido"); return; }
+        long id = (idObj instanceof Number) ? ((Number) idObj).longValue() : Long.parseLong(idObj.toString());
+        int opt = JOptionPane.showConfirmDialog(this, "¿Confirma eliminar pedido ID " + id + "?", "Confirmar", JOptionPane.YES_NO_OPTION);
+        if (opt == JOptionPane.YES_OPTION) {
+            pedidoDAO.delete(id);
+            showSuccessMessage("Pedido eliminado");
+            loadData();
         }
     }
 
@@ -513,93 +694,63 @@ public class PedidoWindow extends JFrame {
         new PedidoWindow(this, "CREATE").setVisible(true);
     }
 
-private void openFinalizarWindow() {
-    int selectedRow = pedidosTable.getSelectedRow();
-    if (selectedRow == -1) {
-        showWarningMessage("Seleccioná un pedido en la lista para finalizar.");
-        return;
+    private void openFinalizarWindow() {
+        int selected = pedidosTable.getSelectedRow();
+        if (selected == -1) { showWarningMessage("Seleccioná un pedido en la lista para finalizar."); return; }
+        Object idObj = pedidosTableModel.getValueAt(selected, 0);
+        if (idObj == null) { showErrorMessage("No se pudo obtener el ID del pedido seleccionado."); return; }
+        long id = (idObj instanceof Number) ? ((Number) idObj).longValue() : Long.parseLong(idObj.toString());
+        Pedido pedido = pedidoDAO.findById(id);
+        if (pedido == null) { showErrorMessage("Pedido no encontrado: " + id); return; }
+        FinalizarPedidoWindow fpw = new FinalizarPedidoWindow(this, pedido);
+        fpw.setVisible(true);
     }
 
-    // Obtener ID del pedido desde la tabla
-    Object idObj = pedidosTableModel.getValueAt(selectedRow, 0);
-    if (idObj == null) {
-        showErrorMessage("No se pudo obtener el ID del pedido seleccionado.");
-        return;
-    }
-
-    long idPedido;
-    if (idObj instanceof Number) {
-        idPedido = ((Number) idObj).longValue();
-    } else {
-        try {
-            idPedido = Long.parseLong(idObj.toString());
-        } catch (NumberFormatException e) {
-            showErrorMessage("ID de pedido inválido.");
-            return;
-        }
-    }
-
-    try {
-        // Cargar pedido completo desde DB
-        Pedido pedido = pedidoDAO.findById(idPedido);
-        if (pedido == null) {
-            showErrorMessage("No se encontró el pedido con ID: " + idPedido);
-            return;
-        }
-
-        // Abrir ventana de finalizar pedido
-        FinalizarPedidoWindow finalizarWindow = new FinalizarPedidoWindow(this, pedido);
-        finalizarWindow.setVisible(true);
-
-    } catch (Exception e) {
-        e.printStackTrace();
-        showErrorMessage("Error al abrir ventana de finalización: " + e.getMessage());
-    }
-}
-
-
+    // mensajes
     private void showSuccessMessage(String m) { JOptionPane.showMessageDialog(this, m, "Éxito", JOptionPane.INFORMATION_MESSAGE); }
     private void showErrorMessage(String m) { JOptionPane.showMessageDialog(this, m, "Error", JOptionPane.ERROR_MESSAGE); }
     private void showWarningMessage(String m) { JOptionPane.showMessageDialog(this, m, "Advertencia", JOptionPane.WARNING_MESSAGE); }
 
     private void fillFormWithPedido(Pedido pedido) {
         if (pedido == null) return;
-        // Seleccionar cliente
-        if (cmbCliente != null) {
-            for (int i = 0; i < cmbCliente.getItemCount(); i++) {
-                Cliente cl = cmbCliente.getItemAt(i);
-                if (cl != null && cl.getIdCliente() != null && cl.getIdCliente().equals(pedido.getIdCliente())) {
-                    cmbCliente.setSelectedItem(cl);
-                    break;
-                }
-            }
-        }
-        if (txtFechaPedido != null && pedido.getFechaPedido() != null) {
-            txtFechaPedido.setText(pedido.getFechaPedido().format(DATE_FORMATTER));
-        }
-
-        // Cargar líneas del pedido si tu DetalleDAO implementa findByPedidoId
-        if (lineasTableModel != null) {
-            lineasTableModel.setRowCount(0);
-            try {
-                List<Detalle> detalles = detalleDAO.findByPedidoId(pedido.getIdPedido());
-                if (detalles != null) {
-                    for (Detalle d : detalles) {
-                        Vector<Object> row = new Vector<>();
-                        row.add(d.getIdDetalle());
-                        row.add(d.getIdMaterial());
-                        row.add(d.getMaterialTipo());
-                        row.add(d.getCantidad());
-                        row.add(d.getDimensionesPieza());
-                        row.add(d.getNumeroCortes());
-                        row.add(d.getPesoPieza());
-                        lineasTableModel.addRow(row);
+        // Si querés cargar un pedido para editar: cargar cabecera y detalles
+        try {
+            // cargar cabecera
+            if (pedido.getIdCliente() != null) {
+                // asegurar que el combo esté relleno
+                if (cmbCliente.getItemCount() == 0) loadClientes();
+                for (int i = 0; i < cmbCliente.getItemCount(); i++) {
+                    Cliente c = cmbCliente.getItemAt(i);
+                    if (c != null && c.getIdCliente() != null && c.getIdCliente().equals(pedido.getIdCliente())) {
+                        cmbCliente.setSelectedIndex(i);
+                        break;
                     }
                 }
-            } catch (Exception e) {
-                // si DetalleDAO no está implementado, no interrumpe la carga del pedido
-                System.err.println("No se pudieron cargar detalles del pedido: " + e.getMessage());
             }
+            if (pedido.getFechaPedido() != null) txtFechaPedido.setText(pedido.getFechaPedido().format(DATE_FORMATTER));
+
+            // cargar líneas (manteniendo el orden correcto de columnas)
+            if (tableModel == null) return;
+            tableModel.setRowCount(0);
+            List<Detalle> detalles = detalleDAO.findByPedidoId(pedido.getIdPedido());
+            for (Detalle d : detalles) {
+                Vector<Object> row = new Vector<>();
+                row.add(d.getIdDetalle());                                 // ID_DETALLE
+                row.add(d.getIdMaterial());                                // ID_MATERIAL
+                row.add(d.getMaterialTipo() != null ? d.getMaterialTipo() : ""); // Material (nombre)
+                row.add(d.getCantidad());                                  // Cantidad
+                row.add(d.getDimensionesPieza());                          // Dimensiones
+                row.add(d.getNumeroCortes());                              // Cortes
+                row.add(d.getPesoPieza());                                 // Peso
+                // descontarStock puede ser Integer 0/1 o Boolean; normalizamos a Boolean
+                Boolean desc = Boolean.FALSE;
+                if (d.getDescontarStock() != null) desc = d.getDescontarStock() != 0;
+                row.add(desc);                                             // Descontar (Boolean)
+                tableModel.addRow(row);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            showErrorMessage("Error cargando pedido para editar: " + e.getMessage());
         }
     }
 }

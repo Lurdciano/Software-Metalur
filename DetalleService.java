@@ -2,39 +2,42 @@ package com.cianmetalurgica.service;
 
 import com.cianmetalurgica.dao.DetalleDAO;
 import com.cianmetalurgica.model.Detalle;
+import java.sql.SQLException;
 import java.util.List;
 
 public class DetalleService {
     private DetalleDAO detalleDAO = new DetalleDAO();
     
-    public void saveDetalle(Detalle detalle) {
-        if (detalle.getPedido() == null) {
-            throw new IllegalArgumentException("El pedido es obligatorio");
-        }
-        if (detalle.getMaterial() == null) {
-            throw new IllegalArgumentException("El material es obligatorio");
-        }
-        if (detalle.getCantidad() == null || detalle.getCantidad() <= 0) {
-            throw new IllegalArgumentException("La cantidad debe ser mayor a 0");
-        }
-        detalleDAO.save(detalle);
+public void saveDetalle(Detalle detalle) throws SQLException {
+    if (detalle.getIdPedido() == null) {
+        throw new IllegalArgumentException("El ID del pedido es obligatorio");
     }
+    if (detalle.getIdMaterial() == null) {
+        throw new IllegalArgumentException("El ID del material es obligatorio");
+    }
+    if (detalle.getCantidad() == null || detalle.getCantidad() <= 0) {
+        throw new IllegalArgumentException("La cantidad debe ser mayor a 0");
+    }
+    detalleDAO.save(detalle); // puede lanzar SQLException
+}
+
+public void updateDetalle(Detalle detalle) throws SQLException {
+    if (detalle.getIdDetalle() == null) {
+        throw new IllegalArgumentException("El ID del detalle es obligatorio para actualizar");
+    }
+    if (detalle.getIdPedido() == null) {
+        throw new IllegalArgumentException("El ID del pedido es obligatorio");
+    }
+    if (detalle.getIdMaterial() == null) {
+        throw new IllegalArgumentException("El ID del material es obligatorio");
+    }
+    if (detalle.getCantidad() == null || detalle.getCantidad() <= 0) {
+        throw new IllegalArgumentException("La cantidad debe ser mayor a 0");
+    }
+    detalleDAO.update(detalle); // puede lanzar SQLException
+}
+
     
-    public void updateDetalle(Detalle detalle) {
-        if (detalle.getIdDetalle() == null) {
-            throw new IllegalArgumentException("El ID del detalle es obligatorio para actualizar");
-        }
-        if (detalle.getPedido() == null) {
-            throw new IllegalArgumentException("El pedido es obligatorio");
-        }
-        if (detalle.getMaterial() == null) {
-            throw new IllegalArgumentException("El material es obligatorio");
-        }
-        if (detalle.getCantidad() == null || detalle.getCantidad() <= 0) {
-            throw new IllegalArgumentException("La cantidad debe ser mayor a 0");
-        }
-        detalleDAO.update(detalle);
-    }
     
     public void deleteDetalle(Long id) {
         if (id == null) {

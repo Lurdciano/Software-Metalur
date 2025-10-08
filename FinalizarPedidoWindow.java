@@ -5,6 +5,7 @@ import com.cianmetalurgica.dao.MaterialDAO;
 import com.cianmetalurgica.dao.PedidoDAO;
 import com.cianmetalurgica.model.Detalle;
 import com.cianmetalurgica.model.Pedido;
+import com.cianmetalurgica.service.DetalleService;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -18,6 +19,7 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
@@ -196,7 +198,7 @@ public class FinalizarPedidoWindow extends JFrame {
         lblTotal.setText("Total: $" + MONEDA.format(total));
     }
 
-    private void onFinalizar() {
+    private void onFinalizar() throws SQLException {
         if (pedido == null) { JOptionPane.showMessageDialog(this, "Pedido nulo", "Error", JOptionPane.ERROR_MESSAGE); return; }
 
         List<Detalle> detallesParaGuardar = new ArrayList<>();
@@ -219,13 +221,15 @@ public class FinalizarPedidoWindow extends JFrame {
         }
 
         // Guardar detalles
-        for (Detalle d : detallesParaGuardar) {
-            if (d.getIdDetalle() != null) {
-                detalleDAO.update(d);
-            } else {
-                detalleDAO.save(d);
-            }
-        }
+DetalleService detalleService = new DetalleService();
+
+for (Detalle d : detallesParaGuardar) {
+    if (d.getIdDetalle() != null) {
+        detalleService.updateDetalle(d);
+    } else {
+        detalleService.saveDetalle(d);
+    }
+}
 
         // Descontar stock si corresponde
         if (chkDescontarStock.isSelected()) {
